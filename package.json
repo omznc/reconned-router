@@ -1,6 +1,6 @@
 {
 	"name": "@reconned/router",
-	"version": "0.1.9",
+	"version": "0.1.10",
 	"description": "Type-safe Bun HTTP router with Zod validation, middleware, and OpenAPI generation",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -62,7 +62,7 @@
 	],
 	"license": "MIT",
 	"publishConfig": {
-        "access": "public"
+		"access": "public"
 	},
 	"repository": {
 		"type": "git",
