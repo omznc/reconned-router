@@ -1,0 +1,64 @@
+{
+	"name": "@reconned/router",
+	"version": "0.1.0",
+	"description": "Type-safe Bun HTTP router with Zod validation, middleware, and OpenAPI generation",
+	"type": "module",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./middlewares": {
+			"types": "./dist/middlewares/index.d.ts",
+			"import": "./dist/middlewares/index.js"
+		},
+		"./openapi": {
+			"types": "./dist/openapi/index.d.ts",
+			"import": "./dist/openapi/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"build": "bun build ./src/index.ts --outdir ./dist --target bun --sourcemap --external zod",
+		"build:types": "tsc --emitDeclarationOnly --declaration --outDir ./dist",
+		"dev": "bun run build --watch",
+		"typecheck": "tsc --noEmit",
+		"test": "bun test",
+		"test:watch": "bun test --watch",
+		"prepublishOnly": "bun run build && bun run build:types"
+},
+	"peerDependencies": {
+		"zod": "^3.0.0 || ^4.0.0",
+		"bun": ">=1.0.0"
+	},
+	"peerDependenciesMeta": {
+		"bun": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/bun": "^1.3.10",
+		"typescript": "5.9.3",
+		"zod": "^4.3.5"
+	},
+	"keywords": [
+		"bun",
+		"router",
+		"http",
+		"middleware",
+		"zod",
+		"openapi",
+		"typescript"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/omznc/reconned-router"
+	}
+}
