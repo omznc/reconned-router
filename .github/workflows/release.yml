@@ -85,5 +85,9 @@ jobs:
           git push origin "@reconned/router@${{ steps.version.outputs.version }}"
 
       - name: Publish to npm
+        env:
+          NPM_CONFIG_PROVENANCE: always
+        run: |
+          npm publish --access public
         run: |
           npm publish --access public
