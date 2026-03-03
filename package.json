@@ -1,6 +1,6 @@
 {
 	"name": "@reconned/router",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Type-safe Bun HTTP router with Zod validation, middleware, and OpenAPI generation",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -32,7 +32,7 @@
 		"test": "bun test",
 		"test:watch": "bun test --watch",
 		"prepublishOnly": "bun run build && bun run build:types"
-},
+	},
 	"peerDependencies": {
 		"zod": "^3.0.0 || ^4.0.0",
 		"bun": ">=1.0.0"
