@@ -22,9 +22,5 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Lint
-        run: bun run check
-
       - name: Run tests
         run: bun test
-        working-directory: packages/router

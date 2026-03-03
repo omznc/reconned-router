@@ -32,7 +32,6 @@ jobs:
       - name: Detect version bump type
         id: bump
         run: |
-          # Get commits since last tag
           LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$LAST_TAG" ]; then
             COMMITS=$(git log --pretty=format:"%s")
@@ -40,13 +39,10 @@ jobs:
             COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"%s")
           fi
           
-          # Check for breaking changes
           if echo "$COMMITS" | grep -qE "^(feat|fix|refactor|perf|style|test|docs|chore)(\(.+\))?!:"; then
             echo "type=major" >> $GITHUB_OUTPUT
-          # Check for features
           elif echo "$COMMITS" | grep -qE "^feat(\(.+\))?:"; then
             echo "type=minor" >> $GITHUB_OUTPUT
-          # Default to patch
           else
             echo "type=patch" >> $GITHUB_OUTPUT
           fi
@@ -54,10 +50,8 @@ jobs:
       - name: Bump version
         id: version
         run: |
-          cd packages/router
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           
-          # Bump version using npm version command
           case ${{ steps.bump.outputs.type }} in
             major) NEW_VERSION=$(npm version major --no-git-tag-version) ;;
             minor) NEW_VERSION=$(npm version minor --no-git-tag-version) ;;
@@ -69,13 +63,11 @@ jobs:
 
       - name: Build package
         run: |
-          cd packages/router
           bun run build
-          bun run build:types
 
       - name: Commit version bump
         run: |
-          git add packages/router/package.json
+          git add package.json
           git commit -m "chore(release): @reconned/router@${{ steps.version.outputs.version }}" || echo "No changes to commit"
 
       - name: Create tag
@@ -89,7 +81,4 @@ jobs:
 
       - name: Publish to npm
         run: |
-          cd packages/router
           npm publish --provenance --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
