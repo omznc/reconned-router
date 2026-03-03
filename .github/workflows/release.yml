@@ -89,5 +89,3 @@ jobs:
           NPM_CONFIG_PROVENANCE: always
         run: |
           npm publish --access public
-        run: |
-          npm publish --access public
