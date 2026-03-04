@@ -1,7 +1,9 @@
 name: Release
 
 on:
-  push:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
     branches: [main]
 
 permissions:
@@ -9,23 +11,13 @@ permissions:
   id-token: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.4
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun test
-
   release:
     runs-on: ubuntu-latest
-    needs: test
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -90,12 +82,13 @@ jobs:
 
       - name: Create tag
         run: |
+          git tag -d "@reconned/router@${{ steps.version.outputs.version }}" 2>/dev/null || true
           git tag -a "@reconned/router@${{ steps.version.outputs.version }}" -m "Release @reconned/router@${{ steps.version.outputs.version }}"
 
       - name: Push changes
         run: |
-          git push origin main
-          git push origin "@reconned/router@${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+          git push origin "@reconned/router@${{ steps.version.outputs.version }}" --force
 
       - name: Publish to npm
         run: |
