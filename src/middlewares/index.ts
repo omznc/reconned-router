@@ -259,7 +259,11 @@ export function requestLoggingMiddleware(
 					request.headers.get("cf-connecting-ip") ||
 					"unknown",
 				request_id: (context as unknown as Record<string, unknown>).requestId as string | undefined,
-				...(includeHeaders && { headers: Object.fromEntries(request.headers.entries()) }),
+				...(includeHeaders && (() => {
+					const h: Record<string, string> = {};
+					request.headers.forEach((v, k) => { h[k] = v; });
+					return { headers: h };
+				})()),
 			});
 		}
 

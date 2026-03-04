@@ -20,7 +20,7 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"noFallthroughCasesInSwitch": true,
-		"types": []
+		"types": ["bun-types"]
 	},
 "include": ["src/**/*"],
 	"exclude": ["node_modules", "dist", "src/__tests__"]
