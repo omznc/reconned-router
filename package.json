@@ -1,6 +1,6 @@
 {
 	"name": "@reconned/router",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Type-safe Bun HTTP router with Zod validation, middleware, and OpenAPI generation",
 	"type": "module",
 	"main": "./dist/index.js",
