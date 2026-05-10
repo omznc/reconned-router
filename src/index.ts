@@ -29,6 +29,7 @@ export type {
 	InferQueryType,
 	InferResponseType,
 	InferSuccessResponseType,
+	McpToolConfig,
 	MiddlewareContext,
 	MiddlewareHandler,
 	OpenAPIOptions,

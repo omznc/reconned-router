@@ -89,6 +89,11 @@ export type MiddlewareHandler = (options: {
 
 export type ResponseSchema = Record<number | string, z.ZodTypeAny>;
 
+export type McpToolConfig = boolean | {
+	name?: string;
+	description?: string;
+};
+
 /**
  * Schema definition for a route
  */
@@ -100,6 +105,7 @@ export type RouteSchema = {
 	summary?: string;
 	description?: string;
 	tags?: string[];
+	mcpTool?: McpToolConfig;
 };
 
 // ============================================================================
