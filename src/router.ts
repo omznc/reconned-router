@@ -489,7 +489,7 @@ export class Router {
 
 		// Cache check: serve from cache on GET hit
 		if (request.method === "GET" && route.cache && this.cacheStore) {
-			const cacheKey = this.buildCacheKey(route, params, request);
+			const cacheKey = this.buildCacheKey(route, params, request, context);
 			try {
 				const cached = await this.cacheStore.get(cacheKey);
 				if (cached !== null) {
@@ -561,7 +561,7 @@ export class Router {
 			if (handlerResponse.status < 400) {
 				// Store response in cache for GET routes
 				if (request.method === "GET" && route.cache && this.cacheStore) {
-					const cacheKey = this.buildCacheKey(route, params, request);
+					const cacheKey = this.buildCacheKey(route, params, request, context);
 					try {
 						const cloned = handlerResponse.clone();
 						const body = await cloned.json();
@@ -668,12 +668,24 @@ export class Router {
 		}
 	}
 
-	private buildCacheKey(route: Route, params: Record<string, string>, request: Request): string {
+	private buildCacheKey(
+		route: Route,
+		params: Record<string, string>,
+		request: Request,
+		context?: RouteContext,
+	): string {
 		let key = route.cache!.key;
 
 		// Replace {paramName} templates with actual path param values
 		for (const [param, value] of Object.entries(params)) {
 			key = key.replace(`{${param}}`, value);
+		}
+
+		// Append user context if varyByUser is not explicitly disabled
+		const varyByUser = route.cache!.varyByUser ?? true;
+		if (varyByUser) {
+			const userId = context?.user?.id || "anon";
+			key += `:u=${userId}`;
 		}
 
 		// Append sorted varyByQuery params

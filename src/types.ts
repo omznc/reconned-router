@@ -270,6 +270,14 @@ export type RouteCacheConfig = {
 	 * produce different cache entries (e.g., pagination).
 	 */
 	varyByQuery?: string[];
+
+	/**
+	 * When true (default), the cache key includes the user ID (or "anon").
+	 * This prevents authenticated users from seeing each other's private data.
+	 * Set to false for routes where the response is identical for all users
+	 * (e.g., public detail pages that don't filter by user context).
+	 */
+	varyByUser?: boolean;
 };
 
 // ============================================================================
