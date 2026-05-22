@@ -57,13 +57,13 @@ export class Router {
 	private globalRateLimitStore = new InMemoryRateLimitStore();
 	private cacheStore?: CacheStore;
 	private cacheKeyPrefix: string;
-	private defaultSwr: number;
+	private defaultSwr: number | undefined;
 
 	constructor(options?: RouterOptions) {
 		this.defaultRateLimit = options?.defaultRateLimit;
 		this.cacheStore = options?.cache?.store;
 		this.cacheKeyPrefix = options?.cache?.keyPrefix ?? "route:";
-		this.defaultSwr = options?.cache?.defaultSwr ?? 10;
+		this.defaultSwr = options?.cache?.defaultSwr;
 	}
 
 	add<TBody = undefined, TQuery = undefined, TSchema extends RouteSchema | undefined = undefined>(
@@ -674,36 +674,42 @@ export class Router {
 		request: Request,
 		context?: RouteContext,
 	): string {
-		let key = route.cache!.key;
+		const segments: string[] = [];
 
-		// Replace {paramName} templates with actual path param values
+		// Start with resolved key template
+		let key = route.cache!.key;
 		for (const [param, value] of Object.entries(params)) {
 			key = key.replace(`{${param}}`, value);
 		}
+		segments.push(key);
 
 		// Append user context if varyByUser is not explicitly disabled
 		const varyByUser = route.cache!.varyByUser ?? true;
 		if (varyByUser) {
 			const userId = context?.user?.id || "anon";
-			key += `:u=${userId}`;
+			segments.push(`u=${userId}`);
 		}
 
 		// Append sorted varyByQuery params
 		if (route.cache!.varyByQuery && route.cache!.varyByQuery.length > 0) {
 			const url = new URL(request.url);
-			const parts: string[] = [];
+			const qpSegments: string[] = [];
 			for (const qp of [...route.cache!.varyByQuery].sort()) {
 				const val = url.searchParams.get(qp);
 				if (val !== null) {
-					parts.push(`${qp}=${val}`);
+					qpSegments.push(`${qp}=${val}`);
 				}
 			}
-			if (parts.length > 0) {
-				key += `:${parts.join(":")}`;
+			if (qpSegments.length > 0) {
+				segments.push(qpSegments.join(":"));
 			}
 		}
 
-		return `${this.cacheKeyPrefix}${key}`;
+		// Ensure cache key always ends with a `:` segment terminator
+		// so that delByPattern("prefix:{bustKey}:*") always matches.
+		segments.push("");
+
+		return `${this.cacheKeyPrefix}${segments.join(":")}`;
 	}
 
 	private resolveBustKey(bustKey: string, params: Record<string, string>): string {

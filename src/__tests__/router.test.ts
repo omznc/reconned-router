@@ -413,3 +413,318 @@ describe("parseBody", () => {
 		expect(body).toEqual({ key: "value" });
 	});
 });
+
+// ============================================================================
+// Cache Tests
+// ============================================================================
+
+function createInMemoryCacheStore() {
+	const store = new Map<string, string>();
+	return {
+		get: async (key: string) => store.get(key) ?? null,
+		set: async (key: string, value: string, _options?: { ttl?: number }) => {
+			store.set(key, value);
+		},
+		del: async (key: string) => {
+			store.delete(key);
+		},
+		delByPattern: async (pattern: string) => {
+			const glob = new RegExp("^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+			for (const key of store.keys()) {
+				if (glob.test(key)) {
+					store.delete(key);
+				}
+			}
+		},
+		_keys: () => Array.from(store.keys()),
+	};
+}
+
+function createCachedRouter() {
+	const cacheStore = createInMemoryCacheStore();
+	const router = new Router({
+		cache: { store: cacheStore, keyPrefix: "test:" },
+	});
+	return { router, cacheStore };
+}
+
+describe("router caching", () => {
+	test("should cache GET response and serve from cache on second call", async () => {
+		let callCount = 0;
+		const { router, cacheStore } = createCachedRouter();
+
+		router.get(
+			"/items",
+			() => {
+				callCount++;
+				return jsonResponse({ data: "value" });
+			},
+			{ cache: { key: "items", ttl: 60 } },
+		);
+
+		const req1 = createMockRequest("http://localhost/items");
+		const res1 = await router.handle(req1, createMockContext(), jsonResponse);
+		expect(await res1.json()).toEqual({ data: "value" });
+		expect(callCount).toBe(1);
+
+		const req2 = createMockRequest("http://localhost/items");
+		const res2 = await router.handle(req2, createMockContext(), jsonResponse);
+		expect(await res2.json()).toEqual({ data: "value" });
+		expect(callCount).toBe(1); // Handler not called again
+
+		expect(res2.headers.get("Cache-Control")).toBe("public, max-age=60, stale-while-revalidate=600");
+	});
+
+	test("should not cache POST responses", async () => {
+		const { router, cacheStore } = createCachedRouter();
+		let callCount = 0;
+
+		router.post(
+			"/items",
+			() => {
+				callCount++;
+				return jsonResponse({ created: true }, 201);
+			},
+			{ cache: { key: "items", ttl: 60 } },
+		);
+
+		const req1 = createMockRequest("http://localhost/items", "POST", { name: "test" });
+		await router.handle(req1, createMockContext(), jsonResponse);
+		expect(callCount).toBe(1);
+		expect(cacheStore._keys().length).toBe(0); // Not cached
+	});
+
+	test("should bust cache on POST with bustCache", async () => {
+		const { router, cacheStore } = createCachedRouter();
+
+		router.get(
+			"/items",
+			() => jsonResponse({ data: "original" }),
+			{ cache: { key: "items", ttl: 60 } },
+		);
+
+		router.post(
+			"/items",
+			() => jsonResponse({ created: true }, 201),
+			{ bustCache: ["items"] },
+		);
+
+		// Populate cache
+		const req1 = createMockRequest("http://localhost/items");
+		await router.handle(req1, createMockContext(), jsonResponse);
+
+		// Bust cache
+		const req2 = createMockRequest("http://localhost/items", "POST", { name: "test" });
+		await router.handle(req2, createMockContext(), jsonResponse);
+
+		// Cache should be empty
+		expect(cacheStore._keys().length).toBe(0);
+	});
+
+	test("should include query params in cache key", async () => {
+		let callCount = 0;
+		const { router } = createCachedRouter();
+
+		router.get(
+			"/items",
+			({ query }) => {
+				callCount++;
+				return jsonResponse({ page: query?.page });
+			},
+			{
+				cache: { key: "items", ttl: 60, varyByQuery: ["page"] },
+				schema: { query: z.object({ page: z.coerce.number().default(1) }) },
+			},
+		);
+
+		const res1 = await router.handle(
+			createMockRequest("http://localhost/items?page=1"),
+			createMockContext(),
+			jsonResponse,
+		);
+		expect((await res1.json()) as { page: number }).toEqual({ page: 1 });
+		expect(callCount).toBe(1);
+
+		// Different page = different cache entry, handler should be called
+		const res2 = await router.handle(
+			createMockRequest("http://localhost/items?page=2"),
+			createMockContext(),
+			jsonResponse,
+		);
+		expect((await res2.json()) as { page: number }).toEqual({ page: 2 });
+		expect(callCount).toBe(2);
+
+		// Same page again = cache hit
+		const res3 = await router.handle(
+			createMockRequest("http://localhost/items?page=1"),
+			createMockContext(),
+			jsonResponse,
+		);
+		expect((await res3.json()) as { page: number }).toEqual({ page: 1 });
+		expect(callCount).toBe(2);
+	});
+
+	test("should vary cache by user by default", async () => {
+		let callCount = 0;
+		const { router } = createCachedRouter();
+
+		router.get(
+			"/items",
+			() => {
+				callCount++;
+				return jsonResponse({ data: "value" });
+			},
+			{ cache: { key: "items", ttl: 60 } },
+		);
+
+		const ctx1 = { ...createMockContext(), user: { id: "userA", email: "a@test.com", name: "A" } };
+		const ctx2 = { ...createMockContext(), user: { id: "userB", email: "b@test.com", name: "B" } };
+
+		await router.handle(createMockRequest("http://localhost/items"), ctx1, jsonResponse);
+		expect(callCount).toBe(1);
+
+		// Different user = cache miss
+		await router.handle(createMockRequest("http://localhost/items"), ctx2, jsonResponse);
+		expect(callCount).toBe(2);
+
+		// Same user again = cache hit
+		await router.handle(createMockRequest("http://localhost/items"), ctx1, jsonResponse);
+		expect(callCount).toBe(2);
+	});
+
+	test("should not vary by user when varyByUser is false", async () => {
+		let callCount = 0;
+		const { router } = createCachedRouter();
+
+		router.get(
+			"/items",
+			() => {
+				callCount++;
+				return jsonResponse({ data: "value" });
+			},
+			{ cache: { key: "items", ttl: 60, varyByUser: false } },
+		);
+
+		const ctx1 = { ...createMockContext(), user: { id: "userA", email: "a@test.com", name: "A" } };
+		const ctx2 = { ...createMockContext(), user: { id: "userB", email: "b@test.com", name: "B" } };
+
+		await router.handle(createMockRequest("http://localhost/items"), ctx1, jsonResponse);
+		expect(callCount).toBe(1);
+
+		// Different user but varyByUser=false = cache hit
+		await router.handle(createMockRequest("http://localhost/items"), ctx2, jsonResponse);
+		expect(callCount).toBe(1);
+	});
+
+	test("should include path params in cache key", async () => {
+		let callCount = 0;
+		const { router } = createCachedRouter();
+
+		router.get(
+			"/items/:id",
+			() => {
+				callCount++;
+				return jsonResponse({ data: "value" });
+			},
+			{ cache: { key: "item:{id}", ttl: 60, varyByUser: false } },
+		);
+
+		await router.handle(createMockRequest("http://localhost/items/1"), createMockContext(), jsonResponse);
+		expect(callCount).toBe(1);
+
+		// Different ID = different cache entry
+		await router.handle(createMockRequest("http://localhost/items/2"), createMockContext(), jsonResponse);
+		expect(callCount).toBe(2);
+
+		// Same ID again = cache hit
+		await router.handle(createMockRequest("http://localhost/items/1"), createMockContext(), jsonResponse);
+		expect(callCount).toBe(2);
+	});
+
+	test("should not cache non-2xx responses", async () => {
+		const { router, cacheStore } = createCachedRouter();
+
+		router.get(
+			"/items",
+			() => jsonResponse({ error: "not found" }, 404),
+			{ cache: { key: "items", ttl: 60 } },
+		);
+
+		await router.handle(createMockRequest("http://localhost/items"), createMockContext(), jsonResponse);
+		expect(cacheStore._keys().length).toBe(0);
+	});
+
+	test("should set Cache-Control headers on cached GET responses", async () => {
+		const { router } = createCachedRouter();
+
+		router.get(
+			"/items",
+			() => jsonResponse({ data: "value" }),
+			{ cache: { key: "items", ttl: 30, swr: 600 } },
+		);
+
+		const res = await router.handle(
+			createMockRequest("http://localhost/items"),
+			createMockContext(),
+			jsonResponse,
+		);
+		expect(res.headers.get("Cache-Control")).toBe("public, max-age=30, stale-while-revalidate=600");
+	});
+
+	test("should bust specific path-param-based cache keys", async () => {
+		const { router, cacheStore } = createCachedRouter();
+
+		router.get(
+			"/items/:id",
+			() => jsonResponse({ data: "original" }),
+			{ cache: { key: "item:{id}", ttl: 300, varyByUser: false } },
+		);
+
+		router.put(
+			"/items/:id",
+			() => jsonResponse({ updated: true }),
+			{ bustCache: ["item:{id}"], auth: true },
+		);
+
+		// Cache both item:1 and item:2
+		await router.handle(createMockRequest("http://localhost/items/1"), createMockContext(), jsonResponse);
+		await router.handle(createMockRequest("http://localhost/items/2"), createMockContext(), jsonResponse);
+		expect(cacheStore._keys().length).toBe(2);
+
+		// Bust only item:1
+		const ctx = { ...createMockContext(), user: { id: "user", email: "u@test.com", name: "U" } };
+		await router.handle(createMockRequest("http://localhost/items/1", "PUT"), ctx, jsonResponse);
+
+		// Only item:1 cache should be gone
+		const keys = cacheStore._keys();
+		expect(keys.length).toBe(1);
+		expect(keys[0]).toContain("item:2");
+	});
+
+	test("should default varyByUser to true", async () => {
+		let callCount = 0;
+		const { router } = createCachedRouter();
+
+		router.get(
+			"/items",
+			() => {
+				callCount++;
+				return jsonResponse({ data: "value" });
+			},
+			{ cache: { key: "items", ttl: 60 } },
+		);
+
+		const anonCtx = createMockContext();
+		await router.handle(createMockRequest("http://localhost/items"), anonCtx, jsonResponse);
+		expect(callCount).toBe(1);
+
+		// Logged-in user = cache miss
+		const userCtx = { ...createMockContext(), user: { id: "userX", email: "x@test.com", name: "X" } };
+		await router.handle(createMockRequest("http://localhost/items"), userCtx, jsonResponse);
+		expect(callCount).toBe(2);
+
+		// Anonymous again = cache hit (shared among anonymous)
+		await router.handle(createMockRequest("http://localhost/items"), anonCtx, jsonResponse);
+		expect(callCount).toBe(2);
+	});
+});
