@@ -3,6 +3,7 @@ import * as z from "zod";
 import { formatErrorResponse } from "./errors";
 import { InMemoryRateLimitStore } from "./rate-limit-store";
 import type {
+	CacheStore,
 	InferBodyType,
 	InferQueryType,
 	MiddlewareContext,
@@ -10,6 +11,7 @@ import type {
 	RateLimitConfig,
 	ResponseHelper,
 	Route,
+	RouteCacheConfig,
 	RouteContext,
 	RouteHandler,
 	RouteHandlerParams,
@@ -18,6 +20,7 @@ import type {
 } from "./types";
 
 export type {
+	CacheStore,
 	InferBodyType,
 	InferQueryType,
 	MiddlewareContext,
@@ -25,6 +28,7 @@ export type {
 	RateLimitConfig,
 	ResponseHelper,
 	Route,
+	RouteCacheConfig,
 	RouteContext,
 	RouteHandler,
 	RouteHandlerParams,
@@ -51,16 +55,28 @@ export class Router {
 	public middlewares: MiddlewareHandler[] = [];
 	private defaultRateLimit?: RateLimitConfig | false;
 	private globalRateLimitStore = new InMemoryRateLimitStore();
+	private cacheStore?: CacheStore;
+	private cacheKeyPrefix: string;
+	private defaultSwr: number;
 
 	constructor(options?: RouterOptions) {
 		this.defaultRateLimit = options?.defaultRateLimit;
+		this.cacheStore = options?.cache?.store;
+		this.cacheKeyPrefix = options?.cache?.keyPrefix ?? "route:";
+		this.defaultSwr = options?.cache?.defaultSwr ?? 10;
 	}
 
 	add<TBody = undefined, TQuery = undefined, TSchema extends RouteSchema | undefined = undefined>(
 		method: string,
 		path: string,
 		handler: RouteHandler<TBody, TQuery, TSchema>,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: RouteSchema },
+		options?: {
+			auth?: boolean;
+			rateLimit?: RateLimitConfig | false;
+			schema?: RouteSchema;
+			cache?: RouteCacheConfig;
+			bustCache?: string[];
+		},
 	) {
 		this.routes.push({
 			method: method.toUpperCase(),
@@ -69,6 +85,8 @@ export class Router {
 			auth: options?.auth,
 			rateLimit: options?.rateLimit,
 			schema: options?.schema,
+			cache: options?.cache,
+			bustCache: options?.bustCache,
 		} as Route);
 		return this;
 	}
@@ -133,7 +151,7 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, true>,
 		) => Promise<Response> | Response,
-		options?: { auth?: true; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: true; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	private registerMethod<TSchema extends RouteSchema | undefined = undefined>(
 		method: string,
@@ -141,7 +159,7 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, false>,
 		) => Promise<Response> | Response,
-		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	private registerMethod<TSchema extends RouteSchema | undefined = undefined>(
 		method: string,
@@ -149,7 +167,7 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, boolean>,
 		) => Promise<Response> | Response,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	private registerMethod<TSchema extends RouteSchema | undefined = undefined>(
 		method: string,
@@ -157,7 +175,7 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, boolean>,
 		) => Promise<Response> | Response,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this {
 		return this.add(
 			method,
@@ -177,21 +195,21 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, true>,
 		) => Promise<Response> | Response,
-		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	get<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, false>,
 		) => Promise<Response> | Response,
-		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	get<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, boolean>,
 		) => Promise<Response> | Response,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this {
 		return this.registerMethod("GET", path, handler, options);
 	}
@@ -201,21 +219,21 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, true>,
 		) => Promise<Response> | Response,
-		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	post<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, false>,
 		) => Promise<Response> | Response,
-		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	post<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, boolean>,
 		) => Promise<Response> | Response,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this {
 		return this.registerMethod("POST", path, handler, options);
 	}
@@ -225,21 +243,21 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, true>,
 		) => Promise<Response> | Response,
-		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	put<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, false>,
 		) => Promise<Response> | Response,
-		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	put<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, boolean>,
 		) => Promise<Response> | Response,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this {
 		return this.registerMethod("PUT", path, handler, options);
 	}
@@ -249,21 +267,21 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, true>,
 		) => Promise<Response> | Response,
-		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	delete<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, false>,
 		) => Promise<Response> | Response,
-		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	delete<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, boolean>,
 		) => Promise<Response> | Response,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this {
 		return this.registerMethod("DELETE", path, handler, options);
 	}
@@ -273,21 +291,21 @@ export class Router {
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, true>,
 		) => Promise<Response> | Response,
-		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options: { auth: true; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	patch<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, false>,
 		) => Promise<Response> | Response,
-		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: false; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this;
 	patch<TSchema extends RouteSchema | undefined = undefined>(
 		path: string,
 		handler: (
 			params: RouteHandlerParams<InferBodyType<TSchema>, InferQueryType<TSchema>, TSchema, boolean>,
 		) => Promise<Response> | Response,
-		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema },
+		options?: { auth?: boolean; rateLimit?: RateLimitConfig | false; schema?: TSchema; cache?: RouteCacheConfig; bustCache?: string[] },
 	): this {
 		return this.registerMethod("PATCH", path, handler, options);
 	}
@@ -299,6 +317,8 @@ export class Router {
 				auth: route.auth,
 				rateLimit: route.rateLimit,
 				schema: route.schema,
+				cache: route.cache,
+				bustCache: route.bustCache,
 			});
 		}
 		// Note: Middlewares are not copied to avoid applying them globally
@@ -466,8 +486,26 @@ export class Router {
 		}
 
 		const responseHelper = this.createResponseHelper(route.schema, route.path);
+
+		// Cache check: serve from cache on GET hit
+		if (request.method === "GET" && route.cache && this.cacheStore) {
+			const cacheKey = this.buildCacheKey(route, params, request);
+			try {
+				const cached = await this.cacheStore.get(cacheKey);
+				if (cached !== null) {
+					const data = JSON.parse(cached);
+					const swr = route.cache.swr ?? this.defaultSwr ?? route.cache.ttl * 10;
+					return this.addCacheControlHeaders(jsonResponseFn(data, 200), route.cache.ttl, swr);
+				}
+			} catch {
+				// Cache read failure is non-fatal; fall through to handler
+			}
+		}
+
 		try {
 			const hasQuerySchema = !!route.schema?.query;
+			let handlerResponse: Response;
+
 			if (hasBodySchema) {
 				if (route.auth) {
 					const handler = route.handler as unknown as RouteHandler<
@@ -484,22 +522,20 @@ export class Router {
 						response: responseHelper,
 						...(hasQuerySchema && { query: query }),
 					} as RouteHandlerParams<unknown, unknown, typeof route.schema, true>;
-					const response = await handler(handlerParams);
-					return response;
+					handlerResponse = await handler(handlerParams);
+				} else {
+					const handler = route.handler as unknown as RouteHandler<unknown, unknown, typeof route.schema, false>;
+					const handlerParams = {
+						request,
+						params,
+						context: context as unknown as RouteContext<false>,
+						body: body,
+						response: responseHelper,
+						...(hasQuerySchema && { query: query }),
+					} as RouteHandlerParams<unknown, unknown, typeof route.schema, false>;
+					handlerResponse = await handler(handlerParams);
 				}
-				const handler = route.handler as unknown as RouteHandler<unknown, unknown, typeof route.schema, false>;
-				const handlerParams = {
-					request,
-					params,
-					context: context as unknown as RouteContext<false>,
-					body: body,
-					response: responseHelper,
-					...(hasQuerySchema && { query: query }),
-				} as RouteHandlerParams<unknown, unknown, typeof route.schema, false>;
-				const response = await handler(handlerParams);
-				return response;
-			}
-			if (route.auth) {
+			} else if (route.auth) {
 				const handler = route.handler as unknown as RouteHandler<undefined, unknown, typeof route.schema, true>;
 				const handlerParams = {
 					request,
@@ -508,19 +544,55 @@ export class Router {
 					response: responseHelper,
 					...(hasQuerySchema && { query: query }),
 				} as RouteHandlerParams<undefined, unknown, typeof route.schema, true>;
-				const response = await handler(handlerParams);
-				return response;
+				handlerResponse = await handler(handlerParams);
+			} else {
+				const handler = route.handler as unknown as RouteHandler<undefined, unknown, typeof route.schema, false>;
+				const handlerParams = {
+					request,
+					params,
+					context: context as unknown as RouteContext<false>,
+					response: responseHelper,
+					...(hasQuerySchema && { query: query }),
+				} as RouteHandlerParams<undefined, unknown, typeof route.schema, false>;
+				handlerResponse = await handler(handlerParams);
 			}
-			const handler = route.handler as unknown as RouteHandler<undefined, unknown, typeof route.schema, false>;
-			const handlerParams = {
-				request,
-				params,
-				context: context as unknown as RouteContext<false>,
-				response: responseHelper,
-				...(hasQuerySchema && { query: query }),
-			} as RouteHandlerParams<undefined, unknown, typeof route.schema, false>;
-			const response = await handler(handlerParams);
-			return response;
+
+			// Post-processing: cache storing and busting
+			if (handlerResponse.status < 400) {
+				// Store response in cache for GET routes
+				if (request.method === "GET" && route.cache && this.cacheStore) {
+					const cacheKey = this.buildCacheKey(route, params, request);
+					try {
+						const cloned = handlerResponse.clone();
+						const body = await cloned.json();
+						const swr = route.cache.swr ?? this.defaultSwr ?? route.cache.ttl * 10;
+						await this.cacheStore.set(cacheKey, JSON.stringify(body), { ttl: route.cache.ttl + swr });
+					} catch {
+						// Cache write failure is non-fatal
+					}
+				}
+
+				// Bust caches for mutation routes
+				if (route.bustCache && route.bustCache.length > 0 && this.cacheStore) {
+					for (const bustKey of route.bustCache) {
+						try {
+							const resolved = this.resolveBustKey(bustKey, params);
+							const pattern = `${this.cacheKeyPrefix}${resolved}:*`;
+							await this.cacheStore.delByPattern(pattern);
+						} catch {
+							// Cache bust failure is non-fatal
+						}
+					}
+				}
+			}
+
+			// Add Cache-Control headers for GET routes with cache config
+			if (request.method === "GET" && route.cache) {
+				const swr = route.cache.swr ?? this.defaultSwr ?? route.cache.ttl * 10;
+				return this.addCacheControlHeaders(handlerResponse, route.cache.ttl, swr);
+			}
+
+			return handlerResponse;
 		} catch (error) {
 			const errorResponse = formatErrorResponse(error);
 
@@ -594,6 +666,50 @@ export class Router {
 			// On error, allow the request through
 			return null;
 		}
+	}
+
+	private buildCacheKey(route: Route, params: Record<string, string>, request: Request): string {
+		let key = route.cache!.key;
+
+		// Replace {paramName} templates with actual path param values
+		for (const [param, value] of Object.entries(params)) {
+			key = key.replace(`{${param}}`, value);
+		}
+
+		// Append sorted varyByQuery params
+		if (route.cache!.varyByQuery && route.cache!.varyByQuery.length > 0) {
+			const url = new URL(request.url);
+			const parts: string[] = [];
+			for (const qp of [...route.cache!.varyByQuery].sort()) {
+				const val = url.searchParams.get(qp);
+				if (val !== null) {
+					parts.push(`${qp}=${val}`);
+				}
+			}
+			if (parts.length > 0) {
+				key += `:${parts.join(":")}`;
+			}
+		}
+
+		return `${this.cacheKeyPrefix}${key}`;
+	}
+
+	private resolveBustKey(bustKey: string, params: Record<string, string>): string {
+		let resolved = bustKey;
+		for (const [key, value] of Object.entries(params)) {
+			resolved = resolved.replace(`{${key}}`, value);
+		}
+		return resolved;
+	}
+
+	private addCacheControlHeaders(response: Response, maxAge: number, swr: number): Response {
+		const newHeaders = new Headers(response.headers);
+		newHeaders.set("Cache-Control", `public, max-age=${maxAge}, stale-while-revalidate=${swr}`);
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers: newHeaders,
+		});
 	}
 
 	match(request: Request): { route: Route; params: Record<string, string> } | null {

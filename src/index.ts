@@ -24,6 +24,7 @@ export { createOpenAPIHandler, generateOpenAPISpec } from "./openapi";
 export { createRedisStore, InMemoryRateLimitStore, RedisRateLimitStore } from "./rate-limit-store";
 export { jsonResponse, parseBody, Router, responseSchema } from "./router";
 export type {
+	CacheStore,
 	InferBodyType,
 	InferErrorResponseType,
 	InferQueryType,
@@ -39,6 +40,7 @@ export type {
 	RateLimitStore,
 	ResponseHelper,
 	Route,
+	RouteCacheConfig,
 	RouteContext,
 	RouteHandler,
 	RouteHandlerParams,

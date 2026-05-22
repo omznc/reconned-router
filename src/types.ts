@@ -214,6 +214,62 @@ export type Route<TBody = undefined> = {
 	auth?: boolean;
 	rateLimit?: RateLimitConfig | false;
 	schema?: RouteSchema;
+	cache?: RouteCacheConfig;
+	bustCache?: string[];
+};
+
+// ============================================================================
+// Caching
+// ============================================================================
+
+/**
+ * Storage interface for response caching.
+ * Implement this to use different backends (Redis, in-memory, etc.)
+ */
+export interface CacheStore {
+	/** Get a cached value by key */
+	get(key: string): Promise<string | null>;
+
+	/** Set a cached value with optional TTL */
+	set(key: string, value: string, options?: { ttl?: number }): Promise<void>;
+
+	/** Delete a single cache entry */
+	del(key: string): Promise<void>;
+
+	/** Delete all cache entries matching a glob-style pattern (e.g., "route:clubs:*") */
+	delByPattern(pattern: string): Promise<void>;
+}
+
+/**
+ * Per-route cache configuration
+ */
+export type RouteCacheConfig = {
+	/**
+	 * Redis TTL in seconds. Also used as `max-age` in `Cache-Control`.
+	 * The actual Redis TTL is extended by `swr` so data persists during stale-while-revalidate.
+	 */
+	ttl: number;
+
+	/**
+	 * `stale-while-revalidate` value in seconds.
+	 * Defaults to `ttl * 10`.
+	 */
+	swr?: number;
+
+	/**
+	 * Cache key prefix for this route.
+	 * Supports `{paramName}` placeholders that get replaced with path param values.
+	 * Used for targeted cache busting — e.g., key: "clubs" lets you bust all club list caches,
+	 * while key: "club:{id}" lets you bust a specific club's detail cache.
+	 */
+	key: string;
+
+	/**
+	 * Query parameter names that affect the response.
+	 * When specified, these params are included in the cache key so different queries
+	 * produce different cache entries (e.g., pagination).
+	 */
+	varyByQuery?: string[];
 };
 
 // ============================================================================
@@ -226,6 +282,18 @@ export type Route<TBody = undefined> = {
 export type RouterOptions = {
 	/** Default rate limit configuration applied to all routes */
 	defaultRateLimit?: RateLimitConfig | false;
+
+	/** Global cache configuration */
+	cache?: {
+		/** Cache store implementation (e.g., Redis) */
+		store: CacheStore;
+
+		/** Prefix for all cache keys (default: "route:") */
+		keyPrefix?: string;
+
+		/** Default stale-while-revalidate value when not specified on a route (default: ttl * 10) */
+		defaultSwr?: number;
+	};
 };
 
 // ============================================================================
